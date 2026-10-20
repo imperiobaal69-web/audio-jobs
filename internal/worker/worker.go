@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"sync"
@@ -37,6 +38,10 @@ type Config struct {
 	ChaosFailRate     float64       // probability of an injected transient failure (testing only)
 	ChaosProcessDelay time.Duration // extra processing time (testing only)
 
+	// Analyze is the analysis function; nil means audio.Analyze. Load tests
+	// set it to audio.AnalyzeReference to measure the baseline end to end.
+	Analyze func(io.ReadSeeker, audio.Params) (audio.Result, error)
+
 	// BeforeProcess, if set, runs at the start of every attempt; a returned
 	// error fails the attempt as a transient error. Test seam.
 	BeforeProcess func(ctx context.Context, jobID string, attempt int) error
@@ -60,6 +65,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SweepIdle <= 0 {
 		c.SweepIdle = 2 * time.Minute
+	}
+	if c.Analyze == nil {
+		c.Analyze = audio.Analyze
 	}
 	if c.PromoteEvery <= 0 {
 		c.PromoteEvery = 250 * time.Millisecond
@@ -308,7 +316,7 @@ func (w *Worker) process(ctx context.Context, jobID string, c store.Claim) (json
 		return nil, false, fmt.Errorf("open input: %w", err) // transient: shared volume hiccup
 	}
 	defer f.Close()
-	res, err := audio.Analyze(f, audio.DefaultParams)
+	res, err := w.cfg.Analyze(f, audio.DefaultParams)
 	if err != nil {
 		return nil, false, PermanentError{fmt.Errorf("analyze: %w", err)}
 	}

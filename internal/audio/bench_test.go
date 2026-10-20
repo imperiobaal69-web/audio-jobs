@@ -31,3 +31,15 @@ func BenchmarkAnalyze10Min(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkAnalyzeReference10Min(b *testing.B) {
+	wav := tenMinuteWAV()
+	b.SetBytes(int64(len(wav)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := AnalyzeReference(bytes.NewReader(wav), DefaultParams); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

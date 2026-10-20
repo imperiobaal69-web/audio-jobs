@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -48,7 +49,11 @@ type Result struct {
 	SpeechRatio float64   `json:"speech_ratio"`
 }
 
-// Analyze reads a WAV stream and computes the Result.
+// Analyze computes the Result in one streaming pass with constant memory:
+// samples are decoded from a fixed read buffer and folded into running
+// accumulators (global peak and sum of squares, the current waveform bucket,
+// the current silence window), so a two-hour recording needs no more memory
+// than a two-second one.
 func Analyze(r io.ReadSeeker, p Params) (Result, error) {
 	h, err := ParseHeader(r)
 	if err != nil {
@@ -57,108 +62,113 @@ func Analyze(r io.ReadSeeker, p Params) (Result, error) {
 	if _, err := r.Seek(h.DataOffset, io.SeekStart); err != nil {
 		return Result{}, err
 	}
-	raw := make([]byte, h.DataSize)
-	if _, err := io.ReadFull(r, raw); err != nil {
-		return Result{}, fmt.Errorf("read samples: %w", err)
-	}
-
-	// Decode to mono float64 in [-1, 1].
-	var samples []float64
-	frameBytes := h.Channels * 2
-	for i := 0; i+frameBytes <= len(raw); i += frameBytes {
-		var sum float64
-		for c := 0; c < h.Channels; c++ {
-			v := int16(binary.LittleEndian.Uint16(raw[i+2*c:]))
-			sum += float64(v) / 32768.0
-		}
-		samples = append(samples, sum/float64(h.Channels))
-	}
-
+	frames := h.Frames()
 	res := Result{
 		Version:    Version,
 		SampleRate: h.SampleRate,
 		Channels:   h.Channels,
-		DurationMs: int64(len(samples)) * 1000 / int64(h.SampleRate),
+		DurationMs: frames * 1000 / int64(h.SampleRate),
 		Waveform:   []float32{},
 		Silences:   []Segment{},
 	}
-	if len(samples) == 0 {
+	if frames == 0 {
 		res.PeakDBFS, res.RMSDBFS = p.DigitalSilenceDB, p.DigitalSilenceDB
 		return res, nil
 	}
 
-	var peak, sumSq float64
-	for _, s := range samples {
-		if math.Abs(s) > peak {
-			peak = math.Abs(s)
-		}
-		sumSq += math.Pow(s, 2)
+	buckets := int64(p.WaveformBuckets)
+	if buckets > frames {
+		buckets = frames
 	}
-	res.PeakDBFS = toDB(peak, p.DigitalSilenceDB)
-	res.RMSDBFS = toDB(math.Sqrt(sumSq/float64(len(samples))), p.DigitalSilenceDB)
+	res.Waveform = make([]float32, 0, buckets)
+	window := int64(h.SampleRate * p.WindowMs / 1000)
+	rate := int64(h.SampleRate)
+	channels := h.Channels
+	frameBytes := channels * 2
+	invChannels := 1 / float64(channels)
 
-	// Waveform: max absolute amplitude per bucket.
-	buckets := p.WaveformBuckets
-	if buckets > len(samples) {
-		buckets = len(samples)
-	}
-	for b := 0; b < buckets; b++ {
-		start := b * len(samples) / buckets
-		end := (b + 1) * len(samples) / buckets
-		bucket := samples[start:end]
-		var m float64
-		for _, s := range bucket {
-			if math.Abs(s) > m {
-				m = math.Abs(s)
-			}
-		}
-		res.Waveform = append(res.Waveform, float32(m))
-	}
-
-	// Silence: per-window RMS, then runs of quiet windows.
-	window := h.SampleRate * p.WindowMs / 1000
-	type win struct {
-		startMs, endMs int64
-		db             float64
-	}
-	var wins []win
-	for start := 0; start < len(samples); start += window {
-		end := start + window
-		if end > len(samples) {
-			end = len(samples)
-		}
-		var ss float64
-		for _, s := range samples[start:end] {
-			ss += math.Pow(s, 2)
-		}
-		db := toDB(math.Sqrt(ss/float64(end-start)), p.DigitalSilenceDB)
-		wins = append(wins, win{
-			startMs: int64(start) * 1000 / int64(h.SampleRate),
-			endMs:   int64(end) * 1000 / int64(h.SampleRate),
-			db:      db,
-		})
-	}
-	var silentMs int64
-	runStart := int64(-1)
-	var runEnd int64
-	flush := func() {
-		if runStart >= 0 && runEnd-runStart >= int64(p.MinSilenceMs) {
-			res.Silences = append(res.Silences, Segment{StartMs: runStart, EndMs: runEnd})
-			silentMs += runEnd - runStart
-		}
-		runStart = -1
-	}
-	for _, w := range wins {
-		if w.db < p.SilenceDBFS {
+	var (
+		peak, sumSq   float64
+		bucket        int64 // current waveform bucket
+		bucketEnd     = frames / buckets
+		bucketMax     float64
+		winStart      int64 // first frame of the current silence window
+		winSumSq      float64
+		runStart      = int64(-1)
+		runEnd        int64
+		silentMs      int64
+		minSilence    = int64(p.MinSilenceMs)
+		silenceThresh = p.SilenceDBFS
+	)
+	closeWindow := func(end int64) {
+		db := toDB(math.Sqrt(winSumSq/float64(end-winStart)), p.DigitalSilenceDB)
+		startMs, endMs := winStart*1000/rate, end*1000/rate
+		if db < silenceThresh {
 			if runStart < 0 {
-				runStart = w.startMs
+				runStart = startMs
 			}
-			runEnd = w.endMs
-		} else {
-			flush()
+			runEnd = endMs
+		} else if runStart >= 0 {
+			if runEnd-runStart >= minSilence {
+				res.Silences = append(res.Silences, Segment{StartMs: runStart, EndMs: runEnd})
+				silentMs += runEnd - runStart
+			}
+			runStart = -1
+		}
+		winStart, winSumSq = end, 0
+	}
+
+	br := bufio.NewReaderSize(r, 64<<10)
+	buf := make([]byte, 64<<10-(64<<10)%frameBytes) // whole frames only
+	var frame int64
+	for remaining := frames * int64(frameBytes); remaining > 0; {
+		chunk := buf[:min(int64(len(buf)), remaining)]
+		if n, err := io.ReadFull(br, chunk); err != nil {
+			return Result{}, fmt.Errorf("read samples: got %d of %d frames: %w",
+				frame+int64(n/frameBytes), frames, io.ErrUnexpectedEOF)
+		}
+		remaining -= int64(len(chunk))
+		for i := 0; i < len(chunk); i += frameBytes {
+			var s float64
+			if channels == 1 {
+				s = float64(int16(binary.LittleEndian.Uint16(chunk[i:]))) / 32768.0
+			} else {
+				l := float64(int16(binary.LittleEndian.Uint16(chunk[i:]))) / 32768.0
+				rr := float64(int16(binary.LittleEndian.Uint16(chunk[i+2:]))) / 32768.0
+				s = (l + rr) * invChannels
+			}
+			a := math.Abs(s)
+			if a > peak {
+				peak = a
+			}
+			sq := s * s
+			sumSq += sq
+			winSumSq += sq
+			if a > bucketMax {
+				bucketMax = a
+			}
+			frame++
+			if frame == bucketEnd {
+				res.Waveform = append(res.Waveform, float32(bucketMax))
+				bucketMax = 0
+				bucket++
+				bucketEnd = (bucket + 1) * frames / buckets
+			}
+			if frame-winStart == window {
+				closeWindow(frame)
+			}
 		}
 	}
-	flush()
+	if winStart < frames {
+		closeWindow(frames)
+	}
+	if runStart >= 0 && runEnd-runStart >= minSilence {
+		res.Silences = append(res.Silences, Segment{StartMs: runStart, EndMs: runEnd})
+		silentMs += runEnd - runStart
+	}
+
+	res.PeakDBFS = toDB(peak, p.DigitalSilenceDB)
+	res.RMSDBFS = toDB(math.Sqrt(sumSq/float64(frames)), p.DigitalSilenceDB)
 	if res.DurationMs > 0 {
 		res.SpeechRatio = 1 - float64(silentMs)/float64(res.DurationMs)
 	}

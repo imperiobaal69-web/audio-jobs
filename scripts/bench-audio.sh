@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Benchmark the streaming analyzer against the reference implementation on a
+# 10-minute recording and print medians. Usage: scripts/bench-audio.sh [count]
+set -euo pipefail
+cd "$(dirname "$0")/.."
+COUNT="${1:-8}"
+mkdir -p bench/out
+go test ./internal/audio/ -run '^$' -bench 'Analyze' -benchmem -count "$COUNT" -benchtime 3x | tee bench/out/audio-bench.txt >/dev/null
+awk '
+/^Benchmark/ {
+  name=$1; sub(/-[0-9]+$/, "", name)
+  ns[name]=ns[name] " " $3; bytes[name]=$7; allocs[name]=$9; n[name]++
+}
+function median(list,   a, k, i, j, t) {
+  k = split(list, a, " ")
+  for (i = 1; i <= k; i++) for (j = i + 1; j <= k; j++) if (a[j] < a[i]) { t = a[i]; a[i] = a[j]; a[j] = t }
+  return (k % 2) ? a[(k + 1) / 2] : (a[k / 2] + a[k / 2 + 1]) / 2
+}
+END {
+  printf "| benchmark | runs | median time | allocated per op | allocs per op |\n|---|---|---|---|---|\n"
+  for (b in ns) { m[b] = median(ns[b]); printf "| %s | %d | %.1f ms | %s B | %s |\n", b, n[b], m[b] / 1e6, bytes[b], allocs[b] }
+  r = "BenchmarkAnalyzeReference10Min"; s = "BenchmarkAnalyze10Min"
+  if (m[r] && m[s]) printf "\nSpeed-up (median): %.1fx; memory: %.0fx less\n", m[r] / m[s], bytes[r] / bytes[s]
+}' bench/out/audio-bench.txt

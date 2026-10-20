@@ -110,7 +110,7 @@ func newHarness(t *testing.T) *harness {
 }
 
 func (h *harness) queue(consumer string) *queue.Queue { return queue.New(h.rdb, h.prefix, consumer) }
-func (h *harness) cache() *cache.Results             { return cache.New(h.rdb, h.prefix, time.Hour) }
+func (h *harness) cache() *cache.Results              { return cache.New(h.rdb, h.prefix, time.Hour) }
 
 // startWorker runs a worker until the returned stop function is called;
 // stop returns once the worker has drained.

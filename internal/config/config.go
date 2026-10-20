@@ -29,6 +29,7 @@ type Config struct {
 	ConsumerName      string
 	ChaosFailRate     float64
 	ChaosProcessDelay time.Duration
+	Analyzer          string // "streaming" (default) or "reference"
 }
 
 func Load() Config {
@@ -53,6 +54,7 @@ func Load() Config {
 		ConsumerName:      str("CONSUMER_NAME", host+"-"+strconv.Itoa(os.Getpid())),
 		ChaosFailRate:     num("CHAOS_FAIL_RATE", 0),
 		ChaosProcessDelay: dur("CHAOS_PROCESS_DELAY", 0),
+		Analyzer:          str("ANALYZER", "streaming"),
 	}
 }
 

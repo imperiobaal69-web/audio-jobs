@@ -112,3 +112,48 @@ func abs(v int64) int64 {
 	}
 	return v
 }
+
+// The streaming analyzer must agree with the reference implementation.
+func TestAnalyzeMatchesReference(t *testing.T) {
+	specs := []SynthSpec{
+		speech(10_000),
+		{Seed: 3, SampleRate: 16000, Channels: 2, DurationMs: 7_321, PauseEvery: 1200, PauseMs: 650},
+		{Seed: 4, SampleRate: 44100, Channels: 1, DurationMs: 61_000, PauseEvery: 5000, PauseMs: 2000},
+		{Seed: 5, SampleRate: 8000, Channels: 1, DurationMs: 37, PauseEvery: 10, PauseMs: 10}, // fewer frames than buckets
+	}
+	for _, spec := range specs {
+		wav := Synthesize(spec)
+		want, err := AnalyzeReference(bytes.NewReader(wav), DefaultParams)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := Analyze(bytes.NewReader(wav), DefaultParams)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if math.Abs(got.RMSDBFS-want.RMSDBFS) > 1e-9 || got.PeakDBFS != want.PeakDBFS ||
+			got.DurationMs != want.DurationMs || got.SpeechRatio != want.SpeechRatio {
+			t.Fatalf("%+v: levels differ: got %+v want %+v", spec, got, want)
+		}
+		if len(got.Waveform) != len(want.Waveform) || len(got.Silences) != len(want.Silences) {
+			t.Fatalf("%+v: shape differs", spec)
+		}
+		for i := range want.Waveform {
+			if got.Waveform[i] != want.Waveform[i] {
+				t.Fatalf("%+v: waveform[%d] %v != %v", spec, i, got.Waveform[i], want.Waveform[i])
+			}
+		}
+		for i := range want.Silences {
+			if got.Silences[i] != want.Silences[i] {
+				t.Fatalf("%+v: silence[%d] %v != %v", spec, i, got.Silences[i], want.Silences[i])
+			}
+		}
+	}
+}
+
+func TestTruncatedDataIsAnError(t *testing.T) {
+	wav := Synthesize(speech(1000))
+	if _, err := Analyze(bytes.NewReader(wav[:len(wav)-100]), DefaultParams); err == nil {
+		t.Fatal("want error for truncated data")
+	}
+}

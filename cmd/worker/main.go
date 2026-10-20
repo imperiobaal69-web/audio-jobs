@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/imperiobaal69-web/audio-jobs/internal/audio"
 	"github.com/imperiobaal69-web/audio-jobs/internal/blob"
 	"github.com/imperiobaal69-web/audio-jobs/internal/cache"
 	"github.com/imperiobaal69-web/audio-jobs/internal/config"
@@ -43,7 +44,12 @@ func main() {
 	metricsSrv := &http.Server{Addr: cfg.MetricsAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = metricsSrv.ListenAndServe() }()
 
+	analyze := audio.Analyze
+	if cfg.Analyzer == "reference" {
+		analyze = audio.AnalyzeReference
+	}
 	w := worker.New(worker.Config{
+		Analyze:     analyze,
 		Concurrency: cfg.Concurrency, Visibility: cfg.Visibility,
 		BackoffBase: cfg.BackoffBase, BackoffMax: cfg.BackoffMax,
 		SweepEvery: cfg.SweepEvery, SweepIdle: cfg.SweepIdle,
@@ -51,7 +57,7 @@ func main() {
 	}, st, queue.New(rdb, cfg.KeyPrefix, cfg.ConsumerName), &blob.Store{Dir: cfg.BlobDir},
 		cache.New(rdb, cfg.KeyPrefix, cfg.CacheTTL), log)
 
-	log.Info("worker started", "concurrency", cfg.Concurrency)
+	log.Info("worker started", "concurrency", cfg.Concurrency, "analyzer", cfg.Analyzer)
 	if err := w.Run(ctx, cfg.ShutdownGrace); err != nil {
 		log.Error("worker", "err", err)
 		os.Exit(1)
