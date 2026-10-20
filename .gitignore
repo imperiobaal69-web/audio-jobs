@@ -1,0 +1,5 @@
+/bin/
+/.local/
+/bench/out/
+*.prof
+*.test
