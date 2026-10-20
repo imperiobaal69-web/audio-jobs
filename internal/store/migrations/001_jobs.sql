@@ -21,5 +21,6 @@ create table jobs (
     started_at       timestamptz,
     finished_at      timestamptz,
     constraint jobs_tenant_idempotency_key unique (tenant_id, idempotency_key),
-    constraint jobs_attempts_nonnegative check (attempts >= 0)
+    constraint jobs_attempts_nonnegative check (attempts >= 0),
+    constraint jobs_finished_after_created check (finished_at is null or finished_at >= created_at)
 );

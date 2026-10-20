@@ -3,3 +3,4 @@
 /bench/out/
 *.prof
 *.test
+/bench/results/

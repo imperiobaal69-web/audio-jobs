@@ -244,3 +244,14 @@ func assertDeadLetters(t *testing.T, h *harness, want int64) {
 		t.Fatalf("queue stats %+v, want %d dead and nothing pending", st, want)
 	}
 }
+
+func TestCachedJobTimestampsAreConsistent(t *testing.T) {
+	h := newHarness(t)
+	h.startWorker("w1", worker.Config{})
+	body := wav(11, 1000)
+	h.waitFor("acme", h.submit("acme", "", body).Job.ID, 10*time.Second)
+	cached := h.submit("acme", "", body).Job
+	if !cached.Cached || cached.FinishedAt == nil || cached.FinishedAt.Before(cached.CreatedAt) {
+		t.Fatalf("cached job finished %v before it was created %v", cached.FinishedAt, cached.CreatedAt)
+	}
+}

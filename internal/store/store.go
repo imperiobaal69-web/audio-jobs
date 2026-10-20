@@ -178,19 +178,21 @@ func (s *Store) Create(ctx context.Context, n NewJob) (job Job, created bool, er
 	if n.IdempotencyKey != "" {
 		key = &n.IdempotencyKey
 	}
-	status, finished := Queued, (*time.Time)(nil)
+	status := Queued
 	if n.CachedResult != nil {
-		now := time.Now()
-		status, finished = Succeeded, &now
+		status = Succeeded
 	}
+	// finished_at comes from the database clock, like created_at: mixing the
+	// application's clock in once produced jobs that finished before they
+	// were created.
 	row := s.Pool.QueryRow(ctx, `
 		insert into jobs (tenant_id, idempotency_key, status, input_sha256, input_bytes, max_attempts,
 		                  result, cached, finished_at)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, case when $8 then now() end)
 		on conflict (tenant_id, idempotency_key) do nothing
 		returning `+jobColumns,
 		n.TenantID, key, status, n.InputSHA256, n.InputBytes, n.MaxAttempts,
-		nullJSON(n.CachedResult), n.CachedResult != nil, finished)
+		nullJSON(n.CachedResult), n.CachedResult != nil)
 	job, err = scanJob(row)
 	if errors.Is(err, ErrNotFound) && key != nil {
 		existing, err := scanJob(s.Pool.QueryRow(ctx,
