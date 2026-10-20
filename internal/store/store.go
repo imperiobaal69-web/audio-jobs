@@ -258,23 +258,47 @@ type Claim struct {
 	LeaseToken  string
 }
 
+// StartOutcome says what happened when a delivery tried to start an attempt.
+type StartOutcome int
+
+const (
+	Started     StartOutcome = iota // this delivery now holds the lease
+	AlreadyDone                     // job is terminal: acknowledge the delivery
+	Busy                            // another live attempt holds the lease: leave the delivery pending
+)
+
 // Start begins an attempt: it takes a fresh lease and increments attempts.
-// It returns ok=false when the job is already terminal (a duplicate
-// delivery), in which case the message should simply be acknowledged.
-func (s *Store) Start(ctx context.Context, id string, lease time.Duration) (Claim, bool, error) {
+// A running job can only be taken over once its lease has expired, so a
+// duplicate delivery never steals the lease from a healthy attempt.
+func (s *Store) Start(ctx context.Context, id string, lease time.Duration) (Claim, StartOutcome, error) {
 	var c Claim
 	err := s.Pool.QueryRow(ctx, `
 		update jobs
 		   set status = 'running', attempts = attempts + 1, lease_token = gen_random_uuid(),
 		       lease_expires_at = now() + $2::interval, started_at = coalesce(started_at, now()),
 		       updated_at = now()
-		 where id = $1 and status in ('queued', 'running', 'failed')
+		 where id = $1
+		   and (status in ('queued', 'failed') or (status = 'running' and lease_expires_at < now()))
 		returning attempts, max_attempts, input_sha256, lease_token::text`,
 		id, lease.String()).Scan(&c.Attempt, &c.MaxAttempts, &c.InputSHA256, &c.LeaseToken)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Claim{}, false, nil
+	if err == nil {
+		return c, Started, nil
 	}
-	return c, err == nil, err
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Claim{}, 0, err
+	}
+	var status Status
+	err = s.Pool.QueryRow(ctx, `select status from jobs where id = $1`, id).Scan(&status)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return Claim{}, AlreadyDone, nil // unknown job: nothing to do
+	case err != nil:
+		return Claim{}, 0, err
+	case status == Running:
+		return Claim{}, Busy, nil
+	default:
+		return Claim{}, AlreadyDone, nil
+	}
 }
 
 // Heartbeat extends the lease of a running attempt.

@@ -133,8 +133,8 @@ func TestCrashedWorkerDeliveryIsReclaimed(t *testing.T) {
 	if err != nil || len(msgs) != 1 {
 		t.Fatalf("read: %v %v", msgs, err)
 	}
-	if _, ok, err := h.store.Start(h.ctx, msgs[0].JobID, time.Second); !ok || err != nil {
-		t.Fatalf("start: %v %v", ok, err)
+	if _, outcome, err := h.store.Start(h.ctx, msgs[0].JobID, time.Second); outcome != store.Started || err != nil {
+		t.Fatalf("start: %v %v", outcome, err)
 	}
 
 	h.startWorker("survivor", worker.Config{Visibility: time.Second})
@@ -151,8 +151,15 @@ func TestCrashedWorkerDeliveryIsReclaimed(t *testing.T) {
 func TestStaleLeaseCannotOverwriteNewerAttempt(t *testing.T) {
 	h := newHarness(t)
 	res := h.submit("acme", "", wav(8, 500))
-	slow, _, _ := h.store.Start(h.ctx, res.Job.ID, time.Minute) // attempt 1, then stalls
-	fast, _, _ := h.store.Start(h.ctx, res.Job.ID, time.Minute) // attempt 2 after reclaim
+	slow, _, _ := h.store.Start(h.ctx, res.Job.ID, 50*time.Millisecond) // attempt 1, then stalls
+	if _, outcome, _ := h.store.Start(h.ctx, res.Job.ID, time.Minute); outcome != store.Busy {
+		t.Fatalf("a live lease must not be taken over, got outcome %v", outcome)
+	}
+	time.Sleep(100 * time.Millisecond)                                // lease expires
+	fast, outcome, _ := h.store.Start(h.ctx, res.Job.ID, time.Minute) // attempt 2 after reclaim
+	if outcome != store.Started {
+		t.Fatalf("expired lease: outcome %v", outcome)
+	}
 	if err := h.store.Succeed(h.ctx, res.Job.ID, fast.LeaseToken, json.RawMessage(`{"winner":2}`), false); err != nil {
 		t.Fatal(err)
 	}
@@ -253,5 +260,21 @@ func TestCachedJobTimestampsAreConsistent(t *testing.T) {
 	cached := h.submit("acme", "", body).Job
 	if !cached.Cached || cached.FinishedAt == nil || cached.FinishedAt.Before(cached.CreatedAt) {
 		t.Fatalf("cached job finished %v before it was created %v", cached.FinishedAt, cached.CreatedAt)
+	}
+}
+
+func TestWorkerRecoversWhenRedisLosesTheConsumerGroup(t *testing.T) {
+	h := newHarness(t)
+	h.startWorker("long-running", worker.Config{})
+	first := h.submit("acme", "", wav(12, 500))
+	h.waitFor("acme", first.Job.ID, 10*time.Second)
+
+	// Redis restarts without persistence: stream and consumer group are gone.
+	// The running worker must recover on its own, without a restart.
+	keys, _ := h.rdb.Keys(h.ctx, h.prefix+":*").Result()
+	h.rdb.Del(h.ctx, keys...)
+	second := h.submit("acme", "", wav(13, 500))
+	if j := h.waitFor("acme", second.Job.ID, 10*time.Second); j.Status != store.Succeeded {
+		t.Fatalf("job after group loss: %+v", j)
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -80,12 +81,27 @@ func (q *Queue) Enqueue(ctx context.Context, jobID string) error {
 	}).Err()
 }
 
-// Read blocks up to `block` for at most `count` new deliveries.
+// isNoGroup reports whether Redis lost the stream or consumer group (for
+// example after a restart without persistence).
+func isNoGroup(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "NOGROUP")
+}
+
+// Read blocks up to `block` for at most `count` new deliveries. If Redis has
+// lost the consumer group, it is re-created (from the start of the stream)
+// and the read retried, so long-running workers recover without a restart.
 func (q *Queue) Read(ctx context.Context, count int, block time.Duration) ([]Message, error) {
-	res, err := q.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+	args := &redis.XReadGroupArgs{
 		Group: q.group, Consumer: q.consumer, Streams: []string{q.stream, ">"},
 		Count: int64(count), Block: block,
-	}).Result()
+	}
+	res, err := q.rdb.XReadGroup(ctx, args).Result()
+	if isNoGroup(err) {
+		if err := q.Init(ctx); err != nil {
+			return nil, err
+		}
+		res, err = q.rdb.XReadGroup(ctx, args).Result()
+	}
 	if errors.Is(err, redis.Nil) {
 		return nil, nil
 	}
@@ -106,6 +122,9 @@ func (q *Queue) Reclaim(ctx context.Context, minIdle time.Duration, count int) (
 		Stream: q.stream, Group: q.group, Consumer: q.consumer,
 		MinIdle: minIdle, Start: "0-0", Count: int64(count),
 	}).Result()
+	if isNoGroup(err) {
+		return nil, q.Init(ctx) // nothing pending in a group that did not exist
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -204,13 +204,18 @@ func (w *Worker) Run(ctx context.Context, drain time.Duration) error {
 // retry, or (if the lease was lost) nothing.
 func (w *Worker) handle(ctx context.Context, m queue.Message) {
 	log := w.log.With("job", m.JobID)
-	claim, ok, err := w.store.Start(ctx, m.JobID, w.cfg.Visibility)
-	if err != nil {
+	claim, outcome, err := w.store.Start(ctx, m.JobID, w.cfg.Visibility)
+	switch {
+	case err != nil:
 		log.Warn("start attempt", "err", err) // left pending; it will be reclaimed
 		return
-	}
-	if !ok { // already finished: duplicate delivery
+	case outcome == store.AlreadyDone: // duplicate delivery of a finished job
 		_ = w.queue.Ack(ctx, m.EntryID)
+		return
+	case outcome == store.Busy:
+		// Another attempt holds a live lease. Leave this delivery pending: it
+		// is redelivered after the visibility timeout and acknowledged once the
+		// job is finished, or it takes over if that attempt died.
 		return
 	}
 
