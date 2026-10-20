@@ -85,33 +85,33 @@ for `SHUTDOWN_GRACE`, which stays below the pod's
 
 ## Design decisions and trade-offs
 
-- **Postgres as the source of truth, Redis as transport.** Redis Streams
+- Postgres as the source of truth, Redis as transport. Redis Streams
   gives cheap fan-out, consumer groups and a pending-entries list. Postgres
   gives durable state, constraints and queryable history. Keeping state out of
   Redis means losing Redis costs latency, not jobs; the chaos test shows it.
   The cost is two systems to run, and a dual write on submit, covered by the
   sweeper rather than by a transactional outbox.
-- **At-least-once, with idempotent effects.** Exactly-once delivery is not
+- At-least-once, with idempotent effects. Exactly-once delivery is not
   available. Instead, every state transition is a single conditional
   `UPDATE` (fenced by the lease token), and analysis results depend only on
   the input. The cost is occasional duplicate work, which the `Busy` outcome
   keeps rare.
-- **Keyset pagination, not OFFSET.** At page 101, OFFSET reads 5,089 buffers;
+- Keyset pagination, not OFFSET. At page 101, OFFSET reads 5,089 buffers;
   the keyset query reads 54 (0.911 vs 0.020 ms).
-- **Two indexes, not three.** Listing a tenant's jobs by a rare status still
+- Two indexes, not three. Listing a tenant's jobs by a rare status still
   scans about 11k buffers (1.37 ms). A four-column index would make that
   query instant, but `status` changes 2–3 times per job, and the existing
   indexes already add 42% to the write path. I left it out until the query
   matters.
-- **A partial index for the sweeper.** `WHERE status IN ('queued','running','failed')`
+- A partial index for the sweeper. `WHERE status IN ('queued','running','failed')`
   covers about 1% of the table, so the sweeper costs the same at 1M rows as
   at 1k.
-- **Stream, don't load.** The analyzer runs in constant memory, so worker
+- Stream, don't load. The analyzer runs in constant memory, so worker
   memory limits do not depend on recording length (256 Mi in the
   manifests).
-- **Content addressing.** Identical uploads are stored once, and the hash is
+- Content addressing. Identical uploads are stored once, and the hash is
   the cache key, versioned by the algorithm (`audio.Version`).
-- **Not built:** object storage (the blob store is a shared volume behind
+- Not built: object storage (the blob store is a shared volume behind
   three methods), authentication (tenants are a header), multi-region, and a
   transactional outbox.
 

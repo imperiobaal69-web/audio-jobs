@@ -13,12 +13,12 @@ recording, the job finishes**, no matter which process dies. Postgres is the
 source of truth for job state; Redis Streams only carries deliveries. Three
 mechanisms back the claim:
 
-1. **Reclaim.** A delivery stays in the consumer group's pending list until
+1. Reclaim. A delivery stays in the consumer group's pending list until
    acknowledged. If a worker dies, another one takes it over with `XAUTOCLAIM`
    once it has been idle longer than the visibility timeout.
-2. **Lease fencing.** Each attempt holds a lease token in Postgres. A worker
+2. Lease fencing. Each attempt holds a lease token in Postgres. A worker
    whose lease was taken over cannot overwrite the newer attempt's result.
-3. **Sweeper.** If Redis loses data, workers find unfinished jobs in Postgres
+3. Sweeper. If Redis loses data, workers find unfinished jobs in Postgres
    that have not been touched for a while and enqueue them again.
 
 The integration tests covered each mechanism in isolation. I wanted
@@ -74,7 +74,7 @@ that no consumer group could read.
 
 ## Options considered
 
-1. **Turn on Redis persistence (AOF) and treat a restart as rare.** This
+1. Turn on Redis persistence (AOF) and treat a restart as rare. This
    reduces data loss, but managed Redis fails over, gets flushed by mistake,
    or loses its last second of writes. The system would still have no path
    back from a lost group, so this hides the bug instead of fixing it.
@@ -82,7 +82,7 @@ that no consumer group could read.
    Kubernetes restart it.** This works, but turns a recoverable condition into
    a restart storm across every pod, and it is exactly the accidental repair
    the test had been relying on.
-3. **Re-create the group where the error appears.** When `XREADGROUP` or
+3. Re-create the group where the error appears. When `XREADGROUP` or
    `XAUTOCLAIM` returns `NOGROUP`, call `XGROUP CREATE ... MKSTREAM` from ID
    `0` and retry once. Starting from `0` matters: entries the API added after
    the restart, before any group existed, are delivered instead of skipped.
@@ -117,10 +117,10 @@ before a lease expired.
 
 The fix makes `Start` return one of three outcomes instead of a boolean:
 
-- **`Started`**: the job is queued, failed, or running with an *expired*
+- `Started`: the job is queued, failed, or running with an *expired*
   lease, and this delivery now holds the lease;
-- **`AlreadyDone`**: the job is terminal, so the delivery is acknowledged;
-- **`Busy`**: another attempt holds a live lease. The delivery is *left
+- `AlreadyDone`: the job is terminal, so the delivery is acknowledged;
+- `Busy`: another attempt holds a live lease. The delivery is *left
   pending*: it comes back after the visibility timeout, is acknowledged once
   the job is done, or takes over if the other attempt really died.
 
@@ -147,14 +147,14 @@ re-running the chaos script:
 
 ## What I took from it
 
-- **A passing fault-injection test needs its own sanity checks.** The report
+- A passing fault-injection test needs its own sanity checks. The report
   included counters for every recovery path, and a zero where I expected
   activity was the only sign that anything was wrong. A test that prints only
   PASS or FAIL would have hidden this.
-- **Make sure the fault is not repaired by the harness.** The kill loop and
+- Make sure the fault is not repaired by the harness. The kill loop and
   the Redis restart interacted. Running each fault on its own (here,
   `KILL_WORKERS=0`) separated them.
-- **Saturate the system before injecting failures.** A queue that is empty at
+- Saturate the system before injecting failures. A queue that is empty at
   the moment of the fault has nothing to lose. Running below capacity made
   the recovery paths look idle rather than proven.
 
@@ -165,17 +165,17 @@ re-running the chaos script:
 The first analyzer decoded the whole file into a growing `[]float64` and
 computed squares with `math.Pow(s, 2)`.
 
-- **Profile** (`go test -cpuprofile`): `math.Pow` and its helpers
+- Profile (`go test -cpuprofile`): `math.Pow` and its helpers
   (`frexp`, `ldexp`) took **61%** of CPU. The memory profile showed **414 MB**
   allocated per 10-minute recording.
-- **Change**: stream the samples from a 64 KB buffer into running
+- Change: stream the samples from a 64 KB buffer into running
   accumulators (peak, sum of squares, current waveform bucket, current
   silence window) and square with `s*s`. Memory no longer grows with the
   length of the recording.
-- **Correctness**: the first implementation stays as `AnalyzeReference`.
+- Correctness: the first implementation stays as `AnalyzeReference`.
   `TestAnalyzeMatchesReference` requires the two to agree on mono, stereo,
   44.1 kHz and a file with fewer samples than waveform buckets.
-- **Result** ([benchmark](results/audio-benchmark.md)): about **20× faster**
+- Result ([benchmark](results/audio-benchmark.md)): about **20× faster**
   and **3,000× less memory** per recording. End to end
   ([load test](results/load-test.md), identical inputs):
   - throughput rose from 162 to 532 jobs/s;
