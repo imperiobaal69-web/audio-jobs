@@ -1,0 +1,29 @@
+# Run before rolling out a new version (the migrator takes an advisory lock,
+# so a concurrent run is safe).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: audio-jobs-migrate
+  namespace: audio-jobs
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ghcr.io/imperiobaal69-web/audio-jobs:latest
+          command: ["/usr/local/bin/migrate"]
+          envFrom:
+            - secretRef:
+                name: audio-jobs-db
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]

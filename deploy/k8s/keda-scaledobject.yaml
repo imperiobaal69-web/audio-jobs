@@ -1,0 +1,20 @@
+# Optional, requires KEDA. Scales workers on consumer-group lag (entries not
+# yet delivered) instead of CPU. Use instead of the HPA in worker.yaml, not
+# alongside it.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker
+  namespace: audio-jobs
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 2
+  maxReplicaCount: 40
+  triggers:
+    - type: redis-streams
+      metadata:
+        address: redis.audio-jobs.svc:6379
+        stream: aj:stream
+        consumerGroup: workers
+        lagCount: "50"

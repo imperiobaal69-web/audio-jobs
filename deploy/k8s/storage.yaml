@@ -1,0 +1,13 @@
+# Uploaded recordings, shared by API (writes) and workers (reads). Needs a
+# ReadWriteMany class (EFS, Filestore, CephFS, ...). An object-storage blob
+# backend would remove this volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: blobs
+  namespace: audio-jobs
+spec:
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 100Gi

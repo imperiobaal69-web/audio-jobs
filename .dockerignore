@@ -1,0 +1,5 @@
+.git
+.local
+bin
+bench/out
+bench/results

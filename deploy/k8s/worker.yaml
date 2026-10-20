@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: audio-jobs
+  labels: {app: worker}
+spec:
+  replicas: 4
+  selector:
+    matchLabels: {app: worker}
+  template:
+    metadata:
+      labels: {app: worker}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+    spec:
+      # On SIGTERM the worker stops fetching and drains in-flight jobs for
+      # SHUTDOWN_GRACE (25s); anything left is reclaimed by other pods after
+      # VISIBILITY_TIMEOUT. The grace period must exceed SHUTDOWN_GRACE.
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/imperiobaal69-web/audio-jobs:latest
+          command: ["/usr/local/bin/worker"]
+          ports:
+            - {name: metrics, containerPort: 9090}
+          env:
+            - {name: METRICS_ADDR, value: ":9090"}
+            # Each pod is its own Redis Streams consumer; pending deliveries
+            # of a dead pod are reclaimed by the others.
+            - name: CONSUMER_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: GOMEMLIMIT
+              valueFrom: {resourceFieldRef: {resource: limits.memory}}
+          envFrom:
+            - configMapRef: {name: audio-jobs}
+            - secretRef: {name: audio-jobs-db}
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            # The streaming analyzer runs in constant memory (about 136 KB per
+            # job); the limit leaves room for Go runtime and buffers.
+            requests: {cpu: "1", memory: 128Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: blobs, mountPath: /data/blobs, readOnly: true}
+      volumes:
+        - name: blobs
+          persistentVolumeClaim: {claimName: blobs, readOnly: true}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker
+  namespace: audio-jobs
+spec:
+  maxUnavailable: 25%
+  selector:
+    matchLabels: {app: worker}
+---
+# CPU-based autoscaling works out of the box. Queue depth is the better
+# signal for a job system; see keda-scaledobject.yaml.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker
+  namespace: audio-jobs
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: worker}
+  minReplicas: 2
+  maxReplicas: 40
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 70}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
