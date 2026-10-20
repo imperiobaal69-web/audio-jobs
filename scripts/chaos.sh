@@ -73,7 +73,8 @@ out = [
   "",
   "Faults injected while submitting {jobs} jobs at {rate}/s:".format(jobs=r["jobs"], rate="40"),
   "",
-  f"- {kills} worker processes killed with SIGKILL (one every 2 s, each restarted under a new consumer name)",
+  (f"- {kills} worker processes killed with SIGKILL (one every 2 s, each restarted under a new consumer name)"
+   if kills != "0" else "- No worker processes killed (KILL_WORKERS=0): the same workers run before and after the Redis restart"),
   f"- {rr} Redis restart without persistence: stream, consumer group, pending deliveries, retries and cache all lost",
   "- 5% of attempts fail with an injected transient error; each attempt also takes an extra 500 ms, so kills land mid-job and",
   "  workers fall behind the 40/s arrival rate (16 slots x 2/s = 32 jobs/s): a backlog builds and the Redis restart destroys real queued work",
