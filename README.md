@@ -186,11 +186,12 @@ Prometheus metrics are on `/metrics`: submissions, finished jobs by status,
 attempt and end-to-end latency, retries, reclaims, sweeps, lost leases,
 cache hits, queue depth by state, and in-flight jobs.
 
-**Not yet verified:** the image has not been built locally and the manifests
-have not been applied to a cluster, because this machine has no Docker or
-Kubernetes. The CI workflow builds the image and runs the full test suite
-against Postgres and Redis service containers, but it has not run yet: the
-repository has no remote.
+**Verified in CI:** every push builds the image and runs the full test suite
+with the race detector against Postgres and Redis service containers, and
+validates the manifests with kubeconform
+([workflow](https://github.com/imperiobaal69-web/audio-jobs/actions/workflows/ci.yml)).
+**Not verified here:** the manifests have not been applied to a cluster from
+this repository.
 
 ## Layout
 
