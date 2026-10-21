@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imperiobaal69-web/audio-jobs/internal/store"
-	"github.com/imperiobaal69-web/audio-jobs/internal/worker"
+	"github.com/paulovillalobos/audio-jobs/internal/store"
+	"github.com/paulovillalobos/audio-jobs/internal/worker"
 )
 
 func TestSubmitProcessAndCache(t *testing.T) {

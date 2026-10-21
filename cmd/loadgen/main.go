@@ -20,7 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/imperiobaal69-web/audio-jobs/internal/audio"
+	"github.com/paulovillalobos/audio-jobs/internal/audio"
 )
 
 type job struct {

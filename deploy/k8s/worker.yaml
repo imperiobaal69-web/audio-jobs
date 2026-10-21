@@ -27,7 +27,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: worker
-          image: ghcr.io/imperiobaal69-web/audio-jobs:latest
+          image: ghcr.io/paulovillalobos/audio-jobs:latest
           command: ["/usr/local/bin/worker"]
           ports:
             - {name: metrics, containerPort: 9090}

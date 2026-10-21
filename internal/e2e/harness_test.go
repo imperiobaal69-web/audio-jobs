@@ -25,13 +25,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/imperiobaal69-web/audio-jobs/internal/api"
-	"github.com/imperiobaal69-web/audio-jobs/internal/audio"
-	"github.com/imperiobaal69-web/audio-jobs/internal/blob"
-	"github.com/imperiobaal69-web/audio-jobs/internal/cache"
-	"github.com/imperiobaal69-web/audio-jobs/internal/queue"
-	"github.com/imperiobaal69-web/audio-jobs/internal/store"
-	"github.com/imperiobaal69-web/audio-jobs/internal/worker"
+	"github.com/paulovillalobos/audio-jobs/internal/api"
+	"github.com/paulovillalobos/audio-jobs/internal/audio"
+	"github.com/paulovillalobos/audio-jobs/internal/blob"
+	"github.com/paulovillalobos/audio-jobs/internal/cache"
+	"github.com/paulovillalobos/audio-jobs/internal/queue"
+	"github.com/paulovillalobos/audio-jobs/internal/store"
+	"github.com/paulovillalobos/audio-jobs/internal/worker"
 )
 
 func env(k, def string) string {

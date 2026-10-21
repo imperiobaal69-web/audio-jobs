@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/imperiobaal69-web/audio-jobs/internal/config"
-	"github.com/imperiobaal69-web/audio-jobs/internal/store"
+	"github.com/paulovillalobos/audio-jobs/internal/config"
+	"github.com/paulovillalobos/audio-jobs/internal/store"
 )
 
 func main() {

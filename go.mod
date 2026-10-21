@@ -1,4 +1,4 @@
-module github.com/imperiobaal69-web/audio-jobs
+module github.com/paulovillalobos/audio-jobs
 
 go 1.26.0
 

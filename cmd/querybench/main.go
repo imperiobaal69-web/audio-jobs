@@ -20,7 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/imperiobaal69-web/audio-jobs/internal/store"
+	"github.com/paulovillalobos/audio-jobs/internal/store"
 )
 
 type query struct {

@@ -189,7 +189,7 @@ cache hits, queue depth by state, and in-flight jobs.
 **Verified in CI:** every push builds the image and runs the full test suite
 with the race detector against Postgres and Redis service containers, and
 validates the manifests with kubeconform
-([workflow](https://github.com/imperiobaal69-web/audio-jobs/actions/workflows/ci.yml)).
+([workflow](https://github.com/paulovillalobos/audio-jobs/actions/workflows/ci.yml)).
 **Not verified here:** the manifests have not been applied to a cluster from
 this repository.
 
