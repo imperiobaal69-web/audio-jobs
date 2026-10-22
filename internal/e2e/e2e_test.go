@@ -278,3 +278,43 @@ func TestWorkerRecoversWhenRedisLosesTheConsumerGroup(t *testing.T) {
 		t.Fatalf("job after group loss: %+v", j)
 	}
 }
+
+func TestHeartbeatKeepsALongJobOnItsFirstAttempt(t *testing.T) {
+	h := newHarness(t)
+	// Each attempt takes four visibility timeouts. Without heartbeats the lease
+	// and the delivery expire mid-job and the rival worker takes over.
+	slow := func(context.Context, string, int) error { time.Sleep(time.Second); return nil }
+	h.startWorker("w1", worker.Config{Visibility: 250 * time.Millisecond, BeforeProcess: slow})
+	h.startWorker("rival", worker.Config{Visibility: 250 * time.Millisecond, BeforeProcess: slow})
+
+	res := h.submit("acme", "", wav(14, 500))
+	job := h.waitFor("acme", res.Job.ID, 10*time.Second)
+	if job.Status != store.Succeeded || job.Attempts != 1 {
+		t.Fatalf("job %s after %d attempts, want succeeded after 1", job.Status, job.Attempts)
+	}
+}
+
+func TestHeartbeatExtendsOnlyTheCurrentLease(t *testing.T) {
+	h := newHarness(t)
+	res := h.submit("acme", "", wav(15, 500))
+	claim, _, _ := h.store.Start(h.ctx, res.Job.ID, 100*time.Millisecond)
+
+	if err := h.store.Heartbeat(h.ctx, res.Job.ID, claim.LeaseToken, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond) // past the original lease
+	if _, outcome, _ := h.store.Start(h.ctx, res.Job.ID, time.Minute); outcome != store.Busy {
+		t.Fatalf("extended lease taken over: outcome %v", outcome)
+	}
+
+	other := "00000000-0000-0000-0000-000000000000"
+	if err := h.store.Heartbeat(h.ctx, res.Job.ID, other, time.Minute); !errors.Is(err, store.ErrLostLease) {
+		t.Fatalf("wrong token: want ErrLostLease, got %v", err)
+	}
+	if err := h.store.Succeed(h.ctx, res.Job.ID, claim.LeaseToken, json.RawMessage(`{}`), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Heartbeat(h.ctx, res.Job.ID, claim.LeaseToken, time.Minute); !errors.Is(err, store.ErrLostLease) {
+		t.Fatalf("finished job: want ErrLostLease, got %v", err)
+	}
+}
