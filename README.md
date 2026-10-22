@@ -144,10 +144,10 @@ make k8s-validate  # kubeconform on deploy/k8s
 
 ## Tests
 
-`go test -race ./...` runs 21 tests: 7 analyzer, 1 queue unit, and 13
-integration tests against real Redis and Postgres. Each integration test gets
-its own database and key prefix, and they skip if the services are not
-running. The integration tests cover:
+`go test -race ./...` runs 31 tests: 7 analyzer, 4 unit (queue backoff and
+config), and 20 integration tests against real Redis and Postgres. Each
+integration test gets its own database and key prefix, and they skip if the
+services are not running. The integration tests cover:
 
 - submit, process, and the cache hit;
 - idempotency keys scoped per tenant;
@@ -160,8 +160,12 @@ running. The integration tests cover:
   to be taken over;
 - the sweeper recovering jobs after Redis loses its data;
 - a worker recovering after the consumer group is deleted under it;
+- heartbeats keeping a long job on its first attempt while a rival worker
+  waits, and only the current lease token extending a lease;
 - graceful drain on shutdown;
-- keyset pagination;
+- keyset pagination, in the store and over HTTP with a cursor;
+- the read endpoints: jobs scoped to their tenant, parameter validation, and
+  readiness failing when Redis is down;
 - consistent timestamps on cached jobs.
 
 The analyzer tests require the streaming implementation to match the
